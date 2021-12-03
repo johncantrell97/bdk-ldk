@@ -1,0 +1,18 @@
+[package]
+name = "bdk-ldk"
+version = "0.1.0"
+edition = "2021"
+authors = ["John Cantrell <johncantrell97@gmail.com>"]
+homepage = "https://github.com/johncantrell97/bdk-ldk"
+repository = "https://github.com/johncantrell97/bdk-ldk"
+documentation = "https://docs.rs/bdk_ldk"
+readme = "README.md"
+description = "Use your bdk wallet to implement ldk lightning functionality"
+keywords = ["bitcoin", "lightning", "bdk", "ldk", "wallet"]
+license = "MIT OR Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+lightning = { version = "0.0.103" }
+bdk = { git = "https://github.com/johncantrell97/bdk", version = "0.13.1-dev" }
