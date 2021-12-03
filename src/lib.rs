@@ -9,7 +9,6 @@ use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use lightning::chain::WatchedOutput;
 use lightning::chain::{Confirm, Filter};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::Mutex;
 
 pub type TransactionWithHeight = (u32, Transaction);
@@ -80,22 +79,22 @@ where
 
     /// syncs both your onchain and lightning wallet to current tip
     /// utilizes ldk's Confirm trait to provide chain data
-    pub fn sync(
-        &self,
-        channel_manager: Arc<dyn Confirm>,
-        chain_monitor: Arc<dyn Confirm>,
-    ) -> Result<(), Error> {
+    pub fn sync(&self, confirmables: Vec<&dyn Confirm>) -> Result<(), Error> {
         self.sync_onchain_wallet()?;
 
-        let mut relevant_txids = channel_manager.get_relevant_txids();
-        relevant_txids.append(&mut chain_monitor.get_relevant_txids());
+        let mut relevant_txids = confirmables
+            .iter()
+            .flat_map(|confirmable| confirmable.get_relevant_txids())
+            .collect::<Vec<Txid>>();
+
         relevant_txids.sort_unstable();
         relevant_txids.dedup();
 
         let unconfirmed_txids = self.get_unconfirmed(relevant_txids)?;
         for unconfirmed_txid in unconfirmed_txids {
-            channel_manager.transaction_unconfirmed(&unconfirmed_txid);
-            chain_monitor.transaction_unconfirmed(&unconfirmed_txid);
+            for confirmable in confirmables.iter() {
+                confirmable.transaction_unconfirmed(&unconfirmed_txid);
+            }
         }
 
         let confirmed_txs = self.get_confirmed_txs_by_block()?;
@@ -105,14 +104,17 @@ where
                 .map(|(height, tx)| (height.to_owned(), tx))
                 .collect::<Vec<(usize, &Transaction)>>();
 
-            channel_manager.transactions_confirmed(&header, tx_list_ref.as_slice(), height);
-            chain_monitor.transactions_confirmed(&header, tx_list_ref.as_slice(), height);
+            for confirmable in confirmables.iter() {
+                confirmable.transactions_confirmed(&header, tx_list_ref.as_slice(), height);
+            }
         }
 
         let (tip_height, tip_header) = self.get_tip()?;
 
-        channel_manager.best_block_updated(&tip_header, tip_height);
-        chain_monitor.best_block_updated(&tip_header, tip_height);
+        for confirmable in confirmables.iter() {
+            confirmable.best_block_updated(&tip_header, tip_height);
+        }
+
         Ok(())
     }
 
@@ -213,7 +215,8 @@ where
             .collect()
     }
 
-    fn get_tip(&self) -> Result<(u32, BlockHeader), Error> {
+    /// get a tuple containing the current tip height and header
+    pub fn get_tip(&self) -> Result<(u32, BlockHeader), Error> {
         let wallet = self.inner.lock().unwrap();
         let tip_height = wallet.client().get_height()?;
         let tip_header = wallet.client().get_header(tip_height)?;

@@ -24,6 +24,7 @@ There will be a full bdk-ldk example node that uses this library published in a 
 ```rust
 use std::sync::Arc;
 use bdk::{Wallet, database::MemoryDatabase, blockchain::EsploraBlockchain};
+use lightning::chain::Confirm;
 use bdk_ldk::LightningWallet;
 
 
@@ -43,9 +44,14 @@ fn main() {
 
     ...
 
-    let channel_manager = ...;
-    let chain_monitor = ...;
+    let mut channel_manager = ...;
+    let mut chain_monitor = ...;
 
-    ldk_wallet.sync(channel_manager, chain_monitor);
+    let confirmables = vec![
+		&*channel_manager as &dyn Confirm, 
+		&*chain_monitor as &dyn Confirm
+	];
+
+    ldk_wallet.sync(confirmables);
 }
 ```

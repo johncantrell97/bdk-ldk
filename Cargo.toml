@@ -15,4 +15,4 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 lightning = { version = "0.0.103" }
-bdk = { git = "https://github.com/johncantrell97/bdk", version = "0.13.1-dev" }
+bdk = { git = "https://github.com/johncantrell97/bdk" }
