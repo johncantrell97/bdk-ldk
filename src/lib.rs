@@ -9,7 +9,7 @@ use lightning::chain::chaininterface::{ConfirmationTarget, FeeEstimator};
 use lightning::chain::WatchedOutput;
 use lightning::chain::{Confirm, Filter};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 pub type TransactionWithHeight = (u32, Transaction);
 pub type TransactionWithPosition = (usize, Transaction);
@@ -76,7 +76,7 @@ where
             filter: Mutex::new(TxFilter::new()),
         }
     }
-
+    
     /// syncs both your onchain and lightning wallet to current tip
     /// utilizes ldk's Confirm trait to provide chain data
     pub fn sync(&self, confirmables: Vec<&dyn Confirm>) -> Result<(), Error> {
@@ -151,6 +151,21 @@ where
         let _finalized = wallet.sign(&mut psbt, SignOptions::default())?;
 
         Ok(psbt.extract_tx())
+    }
+
+    /// get the balance of the inner onchain bdk wallet
+    pub fn get_balance(&self) -> Result<u64, Error> {
+        let wallet = self.inner.lock().unwrap();
+        wallet.get_balance().map_err(Error::Bdk)
+    }
+
+    /// get a reference to the inner bdk wallet
+    /// be careful using this because it will hold the lock
+    /// on the inner wallet until the guard is dropped
+    /// this is useful if you need methods on the wallet that
+    /// are not yet exposed on LightningWallet
+    pub fn get_wallet(&self) -> MutexGuard<Wallet<B,D>> {
+        self.inner.lock().unwrap()
     }
 
     fn sync_onchain_wallet(&self) -> Result<(), Error> {
@@ -334,7 +349,7 @@ where
             .estimate_fee(target_blocks)
             .unwrap_or_default();
         let sats_per_vbyte = estimate.as_sat_vb() as u32;
-        sats_per_vbyte * 250
+        sats_per_vbyte * 253
     }
 }
 
