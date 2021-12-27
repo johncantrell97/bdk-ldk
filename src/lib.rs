@@ -76,7 +76,7 @@ where
             filter: Mutex::new(TxFilter::new()),
         }
     }
-    
+
     /// syncs both your onchain and lightning wallet to current tip
     /// utilizes ldk's Confirm trait to provide chain data
     pub fn sync(&self, confirmables: Vec<&dyn Confirm>) -> Result<(), Error> {
@@ -143,7 +143,6 @@ where
         tx_builder
             .add_recipient(output_script.clone(), value)
             .fee_rate(fee_rate)
-            .do_not_spend_change()
             .enable_rbf();
 
         let (mut psbt, _tx_details) = tx_builder.finish()?;
@@ -164,7 +163,7 @@ where
     /// on the inner wallet until the guard is dropped
     /// this is useful if you need methods on the wallet that
     /// are not yet exposed on LightningWallet
-    pub fn get_wallet(&self) -> MutexGuard<Wallet<B,D>> {
+    pub fn get_wallet(&self) -> MutexGuard<Wallet<B, D>> {
         self.inner.lock().unwrap()
     }
 
