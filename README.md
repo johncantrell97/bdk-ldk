@@ -1,3 +1,7 @@
+## DO NOT USE
+
+This library is not maintained and is no longer working.  Please see [LDK Lite](https://github.com/lightningdevkit/ldk-lite) for the preferred way to integrate BDK + LDK. 
+
 ## BDK-LDK
 
 The `bdk-ldk` library hopes to bridge the gaps needed to implement a ldk-based lightning client using a bdk::Wallet.
