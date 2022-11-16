@@ -318,6 +318,31 @@ where
             .map(|header| (height, header, tx_list))
             .map_err(Error::Bdk)
     }
+
+    pub fn get_tx_status_for_script(&self, script: Script, txid: Txid) -> Result<ScriptStatus, Error> {
+        let client = self.client.lock().unwrap();
+
+        let history = client.get_script_tx_history(&script)?;
+
+        let history_of_tx = history
+            .iter()
+            .filter(|(_, tx)| tx.txid() == txid)
+            .collect::<Vec<_>>();
+
+        match history_of_tx.as_slice() {
+            [] => Ok(ScriptStatus::Unseen),
+            [_remaining @ .., (last_tx_status, _)] => {
+
+                if last_tx_status.confirmed {
+                    Ok(ScriptStatus::Confirmed {
+                        block_height: last_tx_status.block_height
+                    })
+                } else {
+                    Ok(ScriptStatus::InMempool)
+                }
+            }
+        }
+    }
 }
 
 impl<B, D> FeeEstimator for LightningWallet<B, D>
@@ -366,6 +391,16 @@ where
         filter.register_output(output);
         // TODO: do we need to check for tx here or wait for next sync?
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ScriptStatus {
+    Unseen,
+    InMempool,
+    Confirmed{
+        block_height: Option<u32>
+    },
+    Retrying,
 }
 
 #[cfg(test)]
