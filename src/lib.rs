@@ -3,7 +3,7 @@ use bdk::bitcoin::{Address, BlockHeader, Script, Transaction, Txid};
 use bdk::blockchain::{Blockchain, GetHeight, WalletSync};
 use bdk::database::BatchDatabase;
 use bdk::wallet::{AddressIndex, Wallet};
-use bdk::{Balance, SignOptions, SyncOptions};
+use bdk::{Balance, FeeRate, SignOptions, SyncOptions};
 
 pub use indexed_chain::{IndexedChain, TxStatus};
 use lightning::chain::chaininterface::BroadcasterInterface;
@@ -381,15 +381,17 @@ where
     D: BatchDatabase,
 {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        let client = self.client.lock().unwrap();
+        let estimate = if let Ok(client) = self.client.lock() {
+            let target_blocks = match confirmation_target {
+                ConfirmationTarget::Background => 6,
+                ConfirmationTarget::Normal => 3,
+                ConfirmationTarget::HighPriority => 1,
+            };
 
-        let target_blocks = match confirmation_target {
-            ConfirmationTarget::Background => 6,
-            ConfirmationTarget::Normal => 3,
-            ConfirmationTarget::HighPriority => 1,
+            client.estimate_fee(target_blocks).unwrap_or_default()
+        } else {
+            FeeRate::default()
         };
-
-        let estimate = client.estimate_fee(target_blocks).unwrap_or_default();
         let sats_per_vbyte = estimate.as_sat_per_vb() as u32;
         sats_per_vbyte * 253
     }
@@ -401,8 +403,13 @@ where
     D: BatchDatabase,
 {
     fn broadcast_transaction(&self, tx: &Transaction) {
-        let client = self.client.lock().unwrap();
-        let _result = client.broadcast(tx);
+        if let Ok(client) = self.client.lock() {
+            if let Err(e) = client.broadcast(tx) {
+                eprintln!("Error broadcasting transaction: {e:#}");
+            }
+        } else {
+            eprintln!("Error locking blockchain mutex");
+        }
     }
 }
 
