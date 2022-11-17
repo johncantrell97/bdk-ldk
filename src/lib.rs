@@ -138,8 +138,8 @@ where
         value: u64,
         target_blocks: usize,
     ) -> Result<Transaction, Error> {
-        let client = self.client.lock().unwrap();
-        let wallet = self.wallet.lock().unwrap();
+        let client = self.get_client_lock()?;
+        let wallet = self.get_wallet_lock()?;
         let mut tx_builder = wallet.build_tx();
         let fee_rate = client.estimate_fee(target_blocks)?;
 
@@ -157,7 +157,7 @@ where
 
     /// get the balance of the inner onchain bdk wallet
     pub fn get_balance(&self) -> Result<Balance, Error> {
-        let wallet = self.wallet.lock().unwrap();
+        let wallet = self.get_wallet_lock()?;
         wallet.get_balance().map_err(Error::Bdk)
     }
 
@@ -171,8 +171,8 @@ where
     }
 
     fn sync_onchain_wallet(&self) -> Result<(), Error> {
-        let wallet = self.wallet.lock().unwrap();
-        let client = self.client.lock().unwrap();
+        let wallet = self.get_wallet_lock()?;
+        let client = self.get_client_lock()?;
         wallet.sync(client.as_ref(), SyncOptions::default())?;
         Ok(())
     }
@@ -235,14 +235,14 @@ where
 
     /// get a tuple containing the current tip height and header
     pub fn get_tip(&self) -> Result<(u32, BlockHeader), Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
         let tip_height = client.get_height()?;
         let tip_header = client.get_header(tip_height)?;
         Ok((tip_height, tip_header))
     }
 
     fn augment_txid_with_confirmation_status(&self, txid: Txid) -> Result<(Txid, bool), Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
         client
             .get_tx_status(&txid)
             .map(|status| match status {
