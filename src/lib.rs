@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use bdk::bitcoin::{Address, BlockHeader, Script, Transaction, Txid};
 use bdk::blockchain::{Blockchain, GetHeight, WalletSync};
 use bdk::database::BatchDatabase;
@@ -372,6 +372,15 @@ where
         self.client
             .lock()
             .map_err(|e| anyhow!("could not lock blockchain client: {e:#}"))
+    }
+
+    /// Unlike `broadcast_transaction`, this one allows the client to inspect the errors
+    pub fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        let client = self.get_client_lock()?;
+        client
+            .broadcast(tx)
+            .context("Failed to broadcast transaction")?;
+        Ok(())
     }
 }
 
