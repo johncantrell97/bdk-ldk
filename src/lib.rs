@@ -1,8 +1,9 @@
+use anyhow::{anyhow, Context};
 use bdk::bitcoin::{Address, BlockHeader, Script, Transaction, Txid};
 use bdk::blockchain::{Blockchain, GetHeight, WalletSync};
 use bdk::database::BatchDatabase;
 use bdk::wallet::{AddressIndex, Wallet};
-use bdk::{Balance, SignOptions, SyncOptions};
+use bdk::{Balance, FeeRate, SignOptions, SyncOptions};
 
 pub use indexed_chain::{IndexedChain, TxStatus};
 use lightning::chain::chaininterface::BroadcasterInterface;
@@ -18,15 +19,12 @@ pub type TransactionWithHeightAndPosition = (u32, Transaction, usize);
 
 mod indexed_chain;
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-    Bdk(bdk::Error),
-}
-
-impl From<bdk::Error> for Error {
-    fn from(e: bdk::Error) -> Self {
-        Self::Bdk(e)
-    }
+    #[error("BDK wallet error")]
+    Bdk(#[from] bdk::Error),
+    #[error("Other")]
+    Other(#[from] anyhow::Error),
 }
 
 struct TxFilter {
@@ -127,7 +125,7 @@ where
     /// this is useful when you need to sweep funds from a channel
     /// back into your onchain wallet.
     pub fn get_unused_address(&self) -> Result<Address, Error> {
-        let wallet = self.wallet.lock().unwrap();
+        let wallet = self.get_wallet_lock()?;
         let address_info = wallet.get_address(AddressIndex::LastUnused)?;
         Ok(address_info.address)
     }
@@ -140,8 +138,8 @@ where
         value: u64,
         target_blocks: usize,
     ) -> Result<Transaction, Error> {
-        let client = self.client.lock().unwrap();
-        let wallet = self.wallet.lock().unwrap();
+        let client = self.get_client_lock()?;
+        let wallet = self.get_wallet_lock()?;
         let mut tx_builder = wallet.build_tx();
         let fee_rate = client.estimate_fee(target_blocks)?;
 
@@ -159,7 +157,7 @@ where
 
     /// get the balance of the inner onchain bdk wallet
     pub fn get_balance(&self) -> Result<Balance, Error> {
-        let wallet = self.wallet.lock().unwrap();
+        let wallet = self.get_wallet_lock()?;
         wallet.get_balance().map_err(Error::Bdk)
     }
 
@@ -168,13 +166,13 @@ where
     /// on the inner wallet until the guard is dropped
     /// this is useful if you need methods on the wallet that
     /// are not yet exposed on LightningWallet
-    pub fn get_wallet(&self) -> MutexGuard<Wallet<D>> {
-        self.wallet.lock().unwrap()
+    pub fn get_wallet(&self) -> Result<MutexGuard<Wallet<D>>, Error> {
+        Ok(self.get_wallet_lock()?)
     }
 
     fn sync_onchain_wallet(&self) -> Result<(), Error> {
-        let wallet = self.wallet.lock().unwrap();
-        let client = self.client.lock().unwrap();
+        let wallet = self.get_wallet_lock()?;
+        let client = self.get_client_lock()?;
         wallet.sync(client.as_ref(), SyncOptions::default())?;
         Ok(())
     }
@@ -237,14 +235,14 @@ where
 
     /// get a tuple containing the current tip height and header
     pub fn get_tip(&self) -> Result<(u32, BlockHeader), Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
         let tip_height = client.get_height()?;
         let tip_header = client.get_header(tip_height)?;
         Ok((tip_height, tip_header))
     }
 
     fn augment_txid_with_confirmation_status(&self, txid: Txid) -> Result<(Txid, bool), Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
         client
             .get_tx_status(&txid)
             .map(|status| match status {
@@ -259,7 +257,7 @@ where
         txid: &Txid,
         script: &Script,
     ) -> Result<Option<TransactionWithHeight>, Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
         client
             .get_script_tx_history(script)
             .map(|history| {
@@ -286,7 +284,7 @@ where
         &self,
         output: &WatchedOutput,
     ) -> Result<Vec<TransactionWithHeight>, Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
 
         client
             .get_script_tx_history(&output.script_pubkey)
@@ -299,7 +297,7 @@ where
         height: u32,
         tx: Transaction,
     ) -> Result<Option<TransactionWithHeightAndPosition>, Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
 
         client
             .get_position_in_block(&tx.txid(), height as usize)
@@ -312,15 +310,19 @@ where
         height: u32,
         tx_list: Vec<TransactionWithPosition>,
     ) -> Result<(u32, BlockHeader, Vec<TransactionWithPosition>), Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
         client
             .get_header(height)
             .map(|header| (height, header, tx_list))
             .map_err(Error::Bdk)
     }
 
-    pub fn get_tx_status_for_script(&self, script: Script, txid: Txid) -> Result<ScriptStatus, Error> {
-        let client = self.client.lock().unwrap();
+    pub fn get_tx_status_for_script(
+        &self,
+        script: Script,
+        txid: Txid,
+    ) -> Result<ScriptStatus, Error> {
+        let client = self.get_client_lock()?;
 
         let history = client.get_script_tx_history(&script)?;
 
@@ -332,10 +334,9 @@ where
         match history_of_tx.as_slice() {
             [] => Ok(ScriptStatus::Unseen),
             [_remaining @ .., (last_tx_status, _)] => {
-
                 if last_tx_status.confirmed {
                     Ok(ScriptStatus::Confirmed {
-                        block_height: last_tx_status.block_height
+                        block_height: last_tx_status.block_height,
                     })
                 } else {
                     Ok(ScriptStatus::InMempool)
@@ -345,7 +346,7 @@ where
     }
 
     pub fn estimate_fee(&self, confirmation_target: ConfirmationTarget) -> Result<u32, Error> {
-        let client = self.client.lock().unwrap();
+        let client = self.get_client_lock()?;
 
         let target_blocks = match confirmation_target {
             ConfirmationTarget::Background => 6,
@@ -358,6 +359,29 @@ where
 
         Ok(sats_per_vbyte)
     }
+
+    // Proxy call to wrap lock into anyhow Error
+    fn get_wallet_lock(&self) -> anyhow::Result<MutexGuard<Wallet<D>>> {
+        self.wallet
+            .lock()
+            .map_err(|e| anyhow!("could not lock wallet: {e:#}"))
+    }
+
+    // Proxy call to wrap lock into anyhow Error
+    fn get_client_lock(&self) -> anyhow::Result<MutexGuard<Box<B>>> {
+        self.client
+            .lock()
+            .map_err(|e| anyhow!("could not lock blockchain client: {e:#}"))
+    }
+
+    /// Unlike `broadcast_transaction`, this one allows the client to inspect the errors
+    pub fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        let client = self.get_client_lock()?;
+        client
+            .broadcast(tx)
+            .context("Failed to broadcast transaction")?;
+        Ok(())
+    }
 }
 
 impl<B, D> FeeEstimator for LightningWallet<B, D>
@@ -366,15 +390,17 @@ where
     D: BatchDatabase,
 {
     fn get_est_sat_per_1000_weight(&self, confirmation_target: ConfirmationTarget) -> u32 {
-        let client = self.client.lock().unwrap();
+        let estimate = if let Ok(client) = self.client.lock() {
+            let target_blocks = match confirmation_target {
+                ConfirmationTarget::Background => 6,
+                ConfirmationTarget::Normal => 3,
+                ConfirmationTarget::HighPriority => 1,
+            };
 
-        let target_blocks = match confirmation_target {
-            ConfirmationTarget::Background => 6,
-            ConfirmationTarget::Normal => 3,
-            ConfirmationTarget::HighPriority => 1,
+            client.estimate_fee(target_blocks).unwrap_or_default()
+        } else {
+            FeeRate::default()
         };
-
-        let estimate = client.estimate_fee(target_blocks).unwrap_or_default();
         let sats_per_vbyte = estimate.as_sat_per_vb() as u32;
         sats_per_vbyte * 253
     }
@@ -386,8 +412,13 @@ where
     D: BatchDatabase,
 {
     fn broadcast_transaction(&self, tx: &Transaction) {
-        let client = self.client.lock().unwrap();
-        let _result = client.broadcast(tx);
+        if let Ok(client) = self.client.lock() {
+            if let Err(e) = client.broadcast(tx) {
+                eprintln!("Error broadcasting transaction: {e:#}");
+            }
+        } else {
+            eprintln!("Error locking blockchain mutex");
+        }
     }
 }
 
@@ -412,9 +443,7 @@ where
 pub enum ScriptStatus {
     Unseen,
     InMempool,
-    Confirmed{
-        block_height: Option<u32>
-    },
+    Confirmed { block_height: Option<u32> },
     Retrying,
 }
 
