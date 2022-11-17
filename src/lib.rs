@@ -343,6 +343,21 @@ where
             }
         }
     }
+
+    pub fn estimate_fee(&self, confirmation_target: ConfirmationTarget) -> Result<u32, Error> {
+        let client = self.client.lock().unwrap();
+
+        let target_blocks = match confirmation_target {
+            ConfirmationTarget::Background => 6,
+            ConfirmationTarget::Normal => 3,
+            ConfirmationTarget::HighPriority => 1,
+        };
+
+        let estimate = client.estimate_fee(target_blocks).unwrap_or_default();
+        let sats_per_vbyte = estimate.as_sat_per_vb() as u32;
+
+        Ok(sats_per_vbyte)
+    }
 }
 
 impl<B, D> FeeEstimator for LightningWallet<B, D>
