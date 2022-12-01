@@ -93,12 +93,22 @@ where
         relevant_txids.sort_unstable();
         relevant_txids.dedup();
 
-        let unconfirmed_txids = self.get_unconfirmed(relevant_txids)?;
-        for unconfirmed_txid in unconfirmed_txids {
-            for confirmable in confirmables.iter() {
-                confirmable.transaction_unconfirmed(&unconfirmed_txid);
-            }
-        }
+        // We comment out the logic that unconfirms transactions
+        // because we don't trust it. We believe that it might be
+        // buggy and we are pretty sure that we run into channels
+        // getting force-closed because of this.
+        //
+        // Since we are only targeting test environments in 10101 for
+        // the time being, this is acceptable.
+
+        // let unconfirmed_txids = self.get_unconfirmed(relevant_txids)?;
+        // for unconfirmed_txid in unconfirmed_txids {
+        //     for confirmable in confirmables.iter() {
+
+        //         confirmable.transaction_unconfirmed(&unconfirmed_txid);
+
+        //     }
+        // }
 
         let confirmed_txs = self.get_confirmed_txs_by_block()?;
         for (height, header, tx_list) in confirmed_txs {
